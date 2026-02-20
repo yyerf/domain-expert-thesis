@@ -29,6 +29,10 @@
     "overrides": {
         "minimatch": "^10.2.1"
     },
+    "engines": {
+        "node": ">=20",
+        "npm": ">=10"
+    },
     "dependencies": {
         "@headlessui/react": "^2.2.0",
         "@inertiajs/react": "^2.3.7",
