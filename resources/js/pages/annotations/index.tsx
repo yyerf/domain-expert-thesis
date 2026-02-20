@@ -55,6 +55,76 @@ type PopulationStats = {
     pending_lines: number;
 };
 
+type FormState = {
+    selectedSymptomLabels: string[];
+    symptomLabelsOther: string;
+    selectedOtc: string[];
+    suggestedOtcOther: string;
+    selectedGender: string[];
+    ageRestrictionOptions: string[];
+    ageRestrictions: string;
+    contraindicationOptions: string[];
+    knownContraindicationsDetails: string;
+    pregnancyOptions: string[];
+    pregnancyConsiderationsDetails: string;
+    requiresMedicalReferralOptions: string[];
+    otcDetails: Record<string, OtcDetail>;
+    inquiryInputMode: 'population' | 'manual';
+    selectedPopulationInquiry: string;
+    manualUserInquiry: string;
+};
+
+function buildFormState(
+    entry: AnnotationEntry | null,
+    pendingPopulationInquiries: string[],
+    nextPopulationInquiry: string | null,
+    populationInquiries: string[],
+): FormState {
+    if (entry) {
+        const parsed = entry.medical_notes
+            ? (JSON.parse(entry.medical_notes) as { otc_dosage_guide?: Record<string, OtcDetail> })
+            : null;
+
+        return {
+            selectedSymptomLabels: entry.symptom_labels,
+            symptomLabelsOther: entry.symptom_labels_other ?? '',
+            selectedOtc: entry.suggested_otc,
+            suggestedOtcOther: entry.suggested_otc_other ?? '',
+            selectedGender: entry.gender_specific_limitations,
+            ageRestrictionOptions: [entry.has_age_restrictions ? 'yes' : 'no'],
+            ageRestrictions: entry.age_restrictions ?? '',
+            contraindicationOptions: [entry.has_known_contraindications ? 'yes' : 'no'],
+            knownContraindicationsDetails: entry.known_contraindications_details ?? '',
+            pregnancyOptions: [entry.has_pregnancy_considerations ? 'yes' : 'no'],
+            pregnancyConsiderationsDetails: entry.pregnancy_considerations_details ?? '',
+            requiresMedicalReferralOptions: [entry.requires_medical_referral ? 'yes' : 'no'],
+            otcDetails: parsed?.otc_dosage_guide ?? {},
+            inquiryInputMode: 'manual',
+            selectedPopulationInquiry: nextPopulationInquiry ?? pendingPopulationInquiries[0] ?? populationInquiries[0] ?? '',
+            manualUserInquiry: entry.user_inquiry,
+        };
+    }
+
+    return {
+        selectedSymptomLabels: [],
+        symptomLabelsOther: '',
+        selectedOtc: [],
+        suggestedOtcOther: '',
+        selectedGender: [],
+        ageRestrictionOptions: [],
+        ageRestrictions: '',
+        contraindicationOptions: [],
+        knownContraindicationsDetails: '',
+        pregnancyOptions: [],
+        pregnancyConsiderationsDetails: '',
+        requiresMedicalReferralOptions: [],
+        otcDetails: {},
+        inquiryInputMode: pendingPopulationInquiries.length > 0 ? 'population' : 'manual',
+        selectedPopulationInquiry: nextPopulationInquiry ?? pendingPopulationInquiries[0] ?? populationInquiries[0] ?? '',
+        manualUserInquiry: '',
+    };
+}
+
 const symptomLabels = [
     'ALLERGIC_RHINITIS',
     'BODY_ACHES',
@@ -130,26 +200,45 @@ export default function AnnotationGuide({
     const page = usePage<{ errors: Record<string, string> }>();
     const hasValidationErrors = Object.keys(page.props.errors ?? {}).length > 0;
 
-    const [selectedSymptomLabels, setSelectedSymptomLabels] = useState<string[]>([]);
-    const [symptomLabelsOther, setSymptomLabelsOther] = useState('');
-    const [selectedOtc, setSelectedOtc] = useState<string[]>([]);
-    const [suggestedOtcOther, setSuggestedOtcOther] = useState('');
-    const [selectedGender, setSelectedGender] = useState<string[]>([]);
-    const [ageRestrictionOptions, setAgeRestrictionOptions] = useState<string[]>([]);
-    const [ageRestrictions, setAgeRestrictions] = useState('');
-    const [contraindicationOptions, setContraindicationOptions] = useState<string[]>([]);
-    const [knownContraindicationsDetails, setKnownContraindicationsDetails] = useState('');
-    const [pregnancyOptions, setPregnancyOptions] = useState<string[]>([]);
-    const [pregnancyConsiderationsDetails, setPregnancyConsiderationsDetails] = useState('');
-    const [requiresMedicalReferralOptions, setRequiresMedicalReferralOptions] = useState<string[]>([]);
-    const [otcDetails, setOtcDetails] = useState<Record<string, OtcDetail>>({});
-    const [inquiryInputMode, setInquiryInputMode] = useState<'population' | 'manual'>(
-        pendingPopulationInquiries.length > 0 ? 'population' : 'manual',
+    const [formState, setFormState] = useState<FormState>(() =>
+        buildFormState(editingEntry, pendingPopulationInquiries, nextPopulationInquiry, populationInquiries),
     );
-    const [selectedPopulationInquiry, setSelectedPopulationInquiry] = useState(
-        nextPopulationInquiry ?? pendingPopulationInquiries[0] ?? populationInquiries[0] ?? '',
-    );
-    const [manualUserInquiry, setManualUserInquiry] = useState('');
+
+    const {
+        selectedSymptomLabels,
+        symptomLabelsOther,
+        selectedOtc,
+        suggestedOtcOther,
+        selectedGender,
+        ageRestrictionOptions,
+        ageRestrictions,
+        contraindicationOptions,
+        knownContraindicationsDetails,
+        pregnancyOptions,
+        pregnancyConsiderationsDetails,
+        requiresMedicalReferralOptions,
+        otcDetails,
+        inquiryInputMode,
+        selectedPopulationInquiry,
+        manualUserInquiry,
+    } = formState;
+
+    const setInquiryInputMode = (mode: 'population' | 'manual'): void =>
+        setFormState((prev) => ({ ...prev, inquiryInputMode: mode }));
+    const setSelectedPopulationInquiry = (value: string): void =>
+        setFormState((prev) => ({ ...prev, selectedPopulationInquiry: value }));
+    const setManualUserInquiry = (value: string): void =>
+        setFormState((prev) => ({ ...prev, manualUserInquiry: value }));
+    const setSymptomLabelsOther = (value: string): void =>
+        setFormState((prev) => ({ ...prev, symptomLabelsOther: value }));
+    const setSuggestedOtcOther = (value: string): void =>
+        setFormState((prev) => ({ ...prev, suggestedOtcOther: value }));
+    const setAgeRestrictions = (value: string): void =>
+        setFormState((prev) => ({ ...prev, ageRestrictions: value }));
+    const setKnownContraindicationsDetails = (value: string): void =>
+        setFormState((prev) => ({ ...prev, knownContraindicationsDetails: value }));
+    const setPregnancyConsiderationsDetails = (value: string): void =>
+        setFormState((prev) => ({ ...prev, pregnancyConsiderationsDetails: value }));
 
     const resolvedUserInquiry = useMemo(() => {
         return inquiryInputMode === 'manual' ? manualUserInquiry : selectedPopulationInquiry;
@@ -211,106 +300,67 @@ export default function AnnotationGuide({
     }, [otcDetails, selectedOtcForNotes]);
 
     const handleOtcSelection = (otc: string, checked: boolean): void => {
-        setSelectedOtc((previous) => {
-            if (checked) {
-                return previous.includes(otc) ? previous : [...previous, otc];
-            }
-
-            return previous.filter((item) => item !== otc);
-        });
+        setFormState((prev) => ({
+            ...prev,
+            selectedOtc: checked
+                ? prev.selectedOtc.includes(otc) ? prev.selectedOtc : [...prev.selectedOtc, otc]
+                : prev.selectedOtc.filter((item) => item !== otc),
+        }));
     };
 
     const handleSymptomSelection = (symptom: string, checked: boolean): void => {
-        setSelectedSymptomLabels((previous) => {
-            if (checked) {
-                return previous.includes(symptom) ? previous : [...previous, symptom];
-            }
-
-            return previous.filter((item) => item !== symptom);
-        });
+        setFormState((prev) => ({
+            ...prev,
+            selectedSymptomLabels: checked
+                ? prev.selectedSymptomLabels.includes(symptom) ? prev.selectedSymptomLabels : [...prev.selectedSymptomLabels, symptom]
+                : prev.selectedSymptomLabels.filter((item) => item !== symptom),
+        }));
     };
 
     const handleGenderSelection = (gender: string, checked: boolean): void => {
-        setSelectedGender((previous) => {
-            if (checked) {
-                return previous.includes(gender) ? previous : [...previous, gender];
-            }
-
-            return previous.filter((item) => item !== gender);
-        });
+        setFormState((prev) => ({
+            ...prev,
+            selectedGender: checked
+                ? prev.selectedGender.includes(gender) ? prev.selectedGender : [...prev.selectedGender, gender]
+                : prev.selectedGender.filter((item) => item !== gender),
+        }));
     };
 
     const handleContraindicationSelection = (option: 'yes' | 'no', checked: boolean): void => {
-        if (!checked) {
-            setContraindicationOptions([]);
-
-            return;
-        }
-
-        setContraindicationOptions([option]);
+        setFormState((prev) => ({ ...prev, contraindicationOptions: checked ? [option] : [] }));
     };
 
     const handleAgeRestrictionSelection = (option: 'yes' | 'no', checked: boolean): void => {
-        if (!checked) {
-            setAgeRestrictionOptions([]);
-
-            return;
-        }
-
-        setAgeRestrictionOptions([option]);
+        setFormState((prev) => ({ ...prev, ageRestrictionOptions: checked ? [option] : [] }));
     };
 
     const handleReferralSelection = (option: 'yes' | 'no', checked: boolean): void => {
-        if (!checked) {
-            setRequiresMedicalReferralOptions([]);
-
-            return;
-        }
-
-        setRequiresMedicalReferralOptions([option]);
+        setFormState((prev) => ({ ...prev, requiresMedicalReferralOptions: checked ? [option] : [] }));
     };
 
     const handlePregnancySelection = (option: 'yes' | 'no', checked: boolean): void => {
-        if (!checked) {
-            setPregnancyOptions([]);
-
-            return;
-        }
-
-        setPregnancyOptions([option]);
+        setFormState((prev) => ({ ...prev, pregnancyOptions: checked ? [option] : [] }));
     };
 
     const updateOtcDetail = (otc: string, field: keyof OtcDetail, value: string): void => {
-        setOtcDetails((previous) => ({
-            ...previous,
-            [otc]: {
-                dosage_mg: previous[otc]?.dosage_mg ?? '',
-                times_per_day: previous[otc]?.times_per_day ?? '',
-                notes: previous[otc]?.notes ?? '',
-                [field]: value,
+        setFormState((prev) => ({
+            ...prev,
+            otcDetails: {
+                ...prev.otcDetails,
+                [otc]: {
+                    dosage_mg: prev.otcDetails[otc]?.dosage_mg ?? '',
+                    times_per_day: prev.otcDetails[otc]?.times_per_day ?? '',
+                    notes: prev.otcDetails[otc]?.notes ?? '',
+                    [field]: value,
+                },
             },
         }));
     };
 
     useEffect(() => {
         if (editingEntry) {
-            setInquiryInputMode('manual');
-            setManualUserInquiry(editingEntry.user_inquiry);
-            setSelectedSymptomLabels(editingEntry.symptom_labels);
-            setSymptomLabelsOther(editingEntry.symptom_labels_other ?? '');
-            setSelectedOtc(editingEntry.suggested_otc);
-            setSuggestedOtcOther(editingEntry.suggested_otc_other ?? '');
-            setSelectedGender(editingEntry.gender_specific_limitations);
-            setAgeRestrictionOptions([editingEntry.has_age_restrictions ? 'yes' : 'no']);
-            setAgeRestrictions(editingEntry.age_restrictions ?? '');
-            setContraindicationOptions([editingEntry.has_known_contraindications ? 'yes' : 'no']);
-            setKnownContraindicationsDetails(editingEntry.known_contraindications_details ?? '');
-            setPregnancyOptions([editingEntry.has_pregnancy_considerations ? 'yes' : 'no']);
-            setPregnancyConsiderationsDetails(editingEntry.pregnancy_considerations_details ?? '');
-            setRequiresMedicalReferralOptions([editingEntry.requires_medical_referral ? 'yes' : 'no']);
-
-            const notes = editingEntry.medical_notes ? JSON.parse(editingEntry.medical_notes) : null;
-            setOtcDetails(notes?.otc_dosage_guide ?? {});
+            // eslint-disable-next-line react-hooks/set-state-in-effect -- intentional: single atomic form population from server-provided editingEntry; no cascade risk as formState is not in deps
+            setFormState(buildFormState(editingEntry, pendingPopulationInquiries, nextPopulationInquiry, populationInquiries));
 
             return;
         }
@@ -319,22 +369,7 @@ export default function AnnotationGuide({
             return;
         }
 
-        setSelectedSymptomLabels([]);
-        setSymptomLabelsOther('');
-        setSelectedOtc([]);
-        setSuggestedOtcOther('');
-        setSelectedGender([]);
-        setAgeRestrictionOptions([]);
-        setAgeRestrictions('');
-        setContraindicationOptions([]);
-        setKnownContraindicationsDetails('');
-        setPregnancyOptions([]);
-        setPregnancyConsiderationsDetails('');
-        setRequiresMedicalReferralOptions([]);
-        setOtcDetails({});
-        setManualUserInquiry('');
-        setInquiryInputMode(pendingPopulationInquiries.length > 0 ? 'population' : 'manual');
-        setSelectedPopulationInquiry(nextPopulationInquiry ?? pendingPopulationInquiries[0] ?? populationInquiries[0] ?? '');
+        setFormState(buildFormState(null, pendingPopulationInquiries, nextPopulationInquiry, populationInquiries));
     }, [editingEntry, entries.length, hasValidationErrors, nextPopulationInquiry, pendingPopulationInquiries, populationInquiries]);
 
     const formAction = editingEntry ? `/annotations/${editingEntry.id}` : '/annotations';
