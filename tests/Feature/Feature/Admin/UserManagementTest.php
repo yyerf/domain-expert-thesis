@@ -47,5 +47,5 @@ test('database seeder provisions required default accounts', function () {
     expect($domainUser?->is_admin)->toBeFalse();
     expect($adminUser?->is_admin)->toBeTrue();
     expect(Hash::check('domainExpertS3cretP@ss!', $domainUser?->password ?? ''))->toBeTrue();
-    expect(Hash::check('AdminP@33!', $adminUser?->password ?? ''))->toBeTrue();
+    expect(Hash::check('AdminP@ss0033!', $adminUser?->password ?? ''))->toBeTrue();
 });

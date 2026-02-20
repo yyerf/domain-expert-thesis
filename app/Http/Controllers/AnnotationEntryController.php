@@ -18,7 +18,8 @@ class AnnotationEntryController extends Controller
      */
     public function index(Request $request): Response
     {
-        $populationInquiries = $this->loadPopulationInquiries();
+        $allRawLines = $this->loadPopulationInquiries(raw: true);
+        $populationInquiries = array_values(array_unique($allRawLines));
         $annotatedEntries = AnnotationEntry::query()
             ->with('annotator:id,name,email')
             ->latest()
@@ -63,7 +64,7 @@ class AnnotationEntryController extends Controller
             'currentAnnotatorId' => auth()->id(),
             'isAdmin' => (bool) auth()->user()?->is_admin,
             'populationStats' => [
-                'total_lines' => count($this->loadPopulationInquiries(raw: true)),
+                'total_lines' => count($allRawLines),
                 'unique_lines' => count($populationInquiries),
                 'pending_lines' => count($pendingPopulationInquiries),
             ],
@@ -89,7 +90,9 @@ class AnnotationEntryController extends Controller
     {
         $validated = $request->validated();
 
-        $annotation->update($this->mapValidatedPayload($validated, $annotation->annotated_by));
+        $payload = $this->mapValidatedPayload($validated, $annotation->annotated_by);
+        unset($payload['is_misclassified']); // preserve existing value; only admin can toggle this
+        $annotation->update($payload);
 
         return to_route('annotations.entries');
     }
@@ -128,34 +131,59 @@ class AnnotationEntryController extends Controller
     }
 
     /**
-     * Export all annotation entries as JSON.
+     * Export all annotation entries as JSON matching the prompt.md schema.
      */
     public function export(): StreamedResponse
     {
         $entries = AnnotationEntry::query()
             ->with('annotator:id,name,email')
-            ->latest()
+            ->oldest()
             ->get();
 
         $filename = 'domain-expert-annotation-guide-'.now()->format('Ymd-His').'.json';
 
         return response()->streamDownload(function () use ($entries): void {
             echo json_encode([
+                '_schema_version' => '1.0',
                 'generated_at' => now()->toIso8601String(),
                 'total_entries' => $entries->count(),
-                'entries' => $entries->map(function (AnnotationEntry $entry): array {
+                'entries' => $entries->values()->map(function (AnnotationEntry $entry, int $index): array {
                     $otcPayload = json_decode($entry->otc_drug_name ?? '[]', true);
                     $medicalNotes = json_decode($entry->medical_notes ?? 'null', true);
+                    $brandExamples = json_decode($entry->brand_examples ?? '[]', true);
+
+                    $selectedOtc = is_array($otcPayload) ? ($otcPayload['selected'] ?? []) : [];
+
+                    // Cast numeric dosage fields to int as required by schema
+                    $castDosageGuide = null;
+                    if (is_array($medicalNotes) && isset($medicalNotes['otc_dosage_guide']) && is_array($medicalNotes['otc_dosage_guide'])) {
+                        $castDosageGuide = [];
+                        foreach ($medicalNotes['otc_dosage_guide'] as $drug => $details) {
+                            $castDosageGuide[$drug] = [
+                                'dosage_mg' => isset($details['dosage_mg']) ? (int) $details['dosage_mg'] : null,
+                                'times_per_day' => isset($details['times_per_day']) ? (int) $details['times_per_day'] : null,
+                                'max_doses_per_day' => isset($details['max_doses_per_day']) ? (int) $details['max_doses_per_day'] : null,
+                                'notes' => $details['notes'] ?? null,
+                            ];
+                        }
+                    }
 
                     return [
+                        'entry_id' => 'de_'.str_pad((string) $entry->id, 3, '0', STR_PAD_LEFT),
                         'user_inquiry' => $entry->symptom_name,
-                        'symptom_labels' => $this->decodeJsonArray($entry->validated_symptom_label),
+                        'user_age' => $entry->user_age,
+                        'language' => $entry->language,
+                        'symptom_labels' => array_values(array_filter(
+                            $this->decodeJsonArray($entry->validated_symptom_label),
+                            fn (string $label): bool => $label !== 'OTHER',
+                        )),
                         'symptom_labels_other' => $entry->assigned_symptom_label !== '' ? $entry->assigned_symptom_label : null,
                         'suggested_otc' => [
-                            'selected' => is_array($otcPayload) ? ($otcPayload['selected'] ?? []) : [],
+                            'selected' => $selectedOtc,
+                            'brand_examples' => is_array($brandExamples) ? $brandExamples : [],
                             'other' => is_array($otcPayload) ? ($otcPayload['other'] ?? null) : null,
                         ],
-                        'age_restrictions' => $entry->age_restrictions !== 'NONE' ? $entry->age_restrictions : null,
+                        'min_age' => $entry->min_age ?? 0,
                         'has_age_restrictions' => $entry->age_restrictions !== null
                             && $entry->age_restrictions !== ''
                             && $entry->age_restrictions !== 'NONE',
@@ -171,12 +199,19 @@ class AnnotationEntryController extends Controller
                         'pregnancy_considerations_details' => $entry->pregnancy_considerations !== 'NONE'
                             ? $entry->pregnancy_considerations
                             : null,
-                        'gender_specific_limitations' => $this->decodeJsonArray($entry->gender_specific_limitations),
+                        'gender_specific_limitations' => $entry->gender_specific_limitations !== 'null'
+                            ? $entry->gender_specific_limitations
+                            : null,
                         'requires_medical_referral' => $entry->requires_medical_referral,
-                        'medical_notes' => is_array($medicalNotes) ? $medicalNotes : null,
+                        'confidence' => $entry->confidence,
+                        'annotated_by' => $entry->annotator?->name ?? 'AI-annotator',
+                        'medical_notes' => count($selectedOtc) > 0 && $castDosageGuide !== null
+                            ? ['otc_dosage_guide' => $castDosageGuide]
+                            : null,
+                        'annotated_at' => $entry->created_at?->toIso8601String(),
                     ];
                 }),
-            ], JSON_PRETTY_PRINT | JSON_UNESCAPED_SLASHES);
+            ], JSON_PRETTY_PRINT | JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE);
         }, $filename, [
             'Content-Type' => 'application/json',
             'Cache-Control' => 'no-store, no-cache, must-revalidate, max-age=0',
@@ -210,6 +245,10 @@ class AnnotationEntryController extends Controller
     {
         return [
             'symptom_name' => $validated['user_inquiry'],
+            'user_age' => isset($validated['user_age']) && $validated['user_age'] !== '' ? (int) $validated['user_age'] : null,
+            'language' => $validated['language'] ?? null,
+            'confidence' => $validated['confidence'],
+            'min_age' => (int) ($validated['min_age'] ?? 0),
             'assigned_symptom_label' => $validated['symptom_labels_other'] ?? '',
             'validated_symptom_label' => json_encode($validated['symptom_labels'], JSON_UNESCAPED_SLASHES),
             'is_misclassified' => false,
@@ -218,13 +257,14 @@ class AnnotationEntryController extends Controller
                 'selected' => $validated['suggested_otc'] ?? [],
                 'other' => $validated['suggested_otc_other'] ?? null,
             ], JSON_UNESCAPED_SLASHES),
+            'brand_examples' => json_encode(array_values(array_filter($validated['brand_examples'] ?? [], fn (mixed $v): bool => is_string($v) && trim($v) !== '')), JSON_UNESCAPED_SLASHES),
             'age_restrictions' => in_array('yes', $validated['age_restriction_options'] ?? [], true)
                 ? ($validated['age_restrictions_details'] ?? null)
                 : 'NONE',
             'pregnancy_considerations' => in_array('yes', $validated['pregnancy_considerations_options'] ?? [], true)
                 ? ($validated['pregnancy_considerations_details'] ?? null)
                 : 'NONE',
-            'gender_specific_limitations' => json_encode($validated['gender_specific_limitations'] ?? [], JSON_UNESCAPED_SLASHES),
+            'gender_specific_limitations' => $validated['gender_specific_limitations'] ?? 'null',
             'known_contraindications' => in_array('yes', $validated['known_contraindications_options'] ?? [], true)
                 ? ($validated['known_contraindications_details'] ?? null)
                 : 'NONE',
@@ -243,25 +283,33 @@ class AnnotationEntryController extends Controller
     protected function transformEntry(AnnotationEntry $entry): array
     {
         $otcPayload = json_decode($entry->otc_drug_name ?? '[]', true);
+        $brandExamples = json_decode($entry->brand_examples ?? '[]', true);
 
         return [
             'id' => $entry->id,
             'user_inquiry' => $entry->symptom_name,
+            'user_age' => $entry->user_age,
+            'language' => $entry->language,
+            'confidence' => $entry->confidence,
+            'min_age' => $entry->min_age ?? 0,
             'symptom_labels' => $this->decodeJsonArray($entry->validated_symptom_label),
             'symptom_labels_other' => $entry->assigned_symptom_label !== '' ? $entry->assigned_symptom_label : null,
             'suggested_otc' => is_array($otcPayload) ? ($otcPayload['selected'] ?? []) : [],
             'suggested_otc_other' => is_array($otcPayload) ? ($otcPayload['other'] ?? null) : null,
+            'brand_examples' => is_array($brandExamples) ? $brandExamples : [],
             'age_restrictions' => $entry->age_restrictions !== 'NONE' ? $entry->age_restrictions : null,
             'has_age_restrictions' => $entry->age_restrictions !== null
                 && $entry->age_restrictions !== ''
                 && $entry->age_restrictions !== 'NONE',
-            'has_known_contraindications' => $entry->known_contraindications !== null && $entry->known_contraindications !== '' && $entry->known_contraindications !== 'NONE',
+            'has_known_contraindications' => $entry->known_contraindications !== null
+                && $entry->known_contraindications !== ''
+                && $entry->known_contraindications !== 'NONE',
             'known_contraindications_details' => $entry->known_contraindications !== 'NONE' ? $entry->known_contraindications : null,
             'has_pregnancy_considerations' => $entry->pregnancy_considerations !== null
                 && $entry->pregnancy_considerations !== ''
                 && $entry->pregnancy_considerations !== 'NONE',
             'pregnancy_considerations_details' => $entry->pregnancy_considerations !== 'NONE' ? $entry->pregnancy_considerations : null,
-            'gender_specific_limitations' => $this->decodeJsonArray($entry->gender_specific_limitations),
+            'gender_specific_limitations' => $entry->gender_specific_limitations !== 'null' ? $entry->gender_specific_limitations : null,
             'requires_medical_referral' => $entry->requires_medical_referral,
             'medical_notes' => $entry->medical_notes,
             'created_at' => $entry->created_at?->toIso8601String(),

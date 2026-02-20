@@ -12,17 +12,22 @@ import type { BreadcrumbItem } from '@/types';
 type AnnotationEntry = {
     id: number;
     user_inquiry: string;
+    user_age: number | null;
+    language: string | null;
+    confidence: string | null;
+    min_age: number;
     symptom_labels: string[];
     symptom_labels_other: string | null;
     suggested_otc: string[];
     suggested_otc_other: string | null;
+    brand_examples: string[];
     age_restrictions: string | null;
     has_age_restrictions: boolean;
     has_known_contraindications: boolean;
     known_contraindications_details: string | null;
     has_pregnancy_considerations: boolean;
     pregnancy_considerations_details: string | null;
-    gender_specific_limitations: string[];
+    gender_specific_limitations: string | null;
     requires_medical_referral: boolean;
     medical_notes: string | null;
     created_at: string | null;
@@ -46,6 +51,7 @@ type AnnotationInquiryStatus = {
 type OtcDetail = {
     dosage_mg: string;
     times_per_day: string;
+    max_doses_per_day: string;
     notes: string;
 };
 
@@ -60,7 +66,8 @@ type FormState = {
     symptomLabelsOther: string;
     selectedOtc: string[];
     suggestedOtcOther: string;
-    selectedGender: string[];
+    brandExamples: string[];
+    genderLimitation: string;
     ageRestrictionOptions: string[];
     ageRestrictions: string;
     contraindicationOptions: string[];
@@ -69,6 +76,10 @@ type FormState = {
     pregnancyConsiderationsDetails: string;
     requiresMedicalReferralOptions: string[];
     otcDetails: Record<string, OtcDetail>;
+    userAge: string;
+    language: string;
+    confidence: string;
+    minAge: string;
     inquiryInputMode: 'population' | 'manual';
     selectedPopulationInquiry: string;
     manualUserInquiry: string;
@@ -90,7 +101,8 @@ function buildFormState(
             symptomLabelsOther: entry.symptom_labels_other ?? '',
             selectedOtc: entry.suggested_otc,
             suggestedOtcOther: entry.suggested_otc_other ?? '',
-            selectedGender: entry.gender_specific_limitations,
+            brandExamples: entry.brand_examples ?? [],
+            genderLimitation: entry.gender_specific_limitations ?? 'null',
             ageRestrictionOptions: [entry.has_age_restrictions ? 'yes' : 'no'],
             ageRestrictions: entry.age_restrictions ?? '',
             contraindicationOptions: [entry.has_known_contraindications ? 'yes' : 'no'],
@@ -99,6 +111,10 @@ function buildFormState(
             pregnancyConsiderationsDetails: entry.pregnancy_considerations_details ?? '',
             requiresMedicalReferralOptions: [entry.requires_medical_referral ? 'yes' : 'no'],
             otcDetails: parsed?.otc_dosage_guide ?? {},
+            userAge: entry.user_age !== null ? String(entry.user_age) : '',
+            language: entry.language ?? '',
+            confidence: entry.confidence ?? '',
+            minAge: String(entry.min_age ?? 0),
             inquiryInputMode: 'manual',
             selectedPopulationInquiry: nextPopulationInquiry ?? pendingPopulationInquiries[0] ?? populationInquiries[0] ?? '',
             manualUserInquiry: entry.user_inquiry,
@@ -110,7 +126,8 @@ function buildFormState(
         symptomLabelsOther: '',
         selectedOtc: [],
         suggestedOtcOther: '',
-        selectedGender: [],
+        brandExamples: [],
+        genderLimitation: 'null',
         ageRestrictionOptions: [],
         ageRestrictions: '',
         contraindicationOptions: [],
@@ -119,54 +136,80 @@ function buildFormState(
         pregnancyConsiderationsDetails: '',
         requiresMedicalReferralOptions: [],
         otcDetails: {},
+        userAge: '',
+        language: '',
+        confidence: '',
+        minAge: '0',
         inquiryInputMode: pendingPopulationInquiries.length > 0 ? 'population' : 'manual',
         selectedPopulationInquiry: nextPopulationInquiry ?? pendingPopulationInquiries[0] ?? populationInquiries[0] ?? '',
         manualUserInquiry: '',
     };
 }
 
+// RULE 1 symptom labels — exactly from prompt.md
 const symptomLabels = [
     'ALLERGIC_RHINITIS',
     'BODY_ACHES',
-    'CHEST_PAIN',
     'COUGH_DRY',
     'COUGH_GENERAL',
     'COUGH_PRODUCTIVE',
     'DIARRHEA',
     'DIZZINESS',
-    'FATIGUE',
     'FEVER',
     'HEADACHE',
-    'NAUSEA',
     'NASAL_CONGESTION',
+    'NAUSEA',
     'RASHES',
     'RUNNY_NOSE',
-    'SHORTNESS_OF_BREATH',
     'SORE_THROAT',
-    'STOMACH_ACHE',
-    'VOMITING',
+    'STOMACH_ACHE_ACID',
+    'UNKNOWN',
 ] as const;
 
+// RULE 2 OTC drugs — generic names exactly as in prompt.md
 const otcOptions = [
-    'Ascorbic Acid (Vitamin C)',
-    'Aspirin',
-    'Bismuth Subsalicylate',
-    'Cetirizine',
-    'Chlorpheniramine',
-    'Dextromethorphan',
-    'Diphenhydramine',
-    'Guaifenesin',
-    'Ibuprofen',
-    'Loperamide',
-    'Loratadine',
     'Paracetamol',
-    'Phenylephrine',
+    'Paracetamol (pediatric)',
+    'Ibuprofen',
+    'Acetylsalicylic acid',
+    'Paracetamol + Phenylephrine + Chlorphenamine (Bioflu)',
+    'Paracetamol + Phenylephrine + Chlorphenamine (\u00b1 Zinc) (Neozep/Neozep Z+)',
+    'Paracetamol + Phenylephrine + Chlorphenamine (Neozep pediatric)',
+    'Paracetamol + Phenylephrine + Chlorphenamine (Decolgen)',
+    'Paracetamol + Decongestant + Antihistamine (Symdex-D Syrup)',
+    'Paracetamol + Decongestant + Antihistamine (Symdex-D Forte)',
+    'Paracetamol + Phenylephrine (Sinutab)',
+    'Dextromethorphan + Paracetamol + Phenylephrine + Chlorphenamine (Tuseran Forte)',
+    'Butamirate citrate',
+    'Lagundi leaf extract',
+    'Carbocisteine',
+    'Guaifenesin',
+    'Cetirizine HCl',
+    'Loratadine',
+    'Diphenhydramine HCl',
+    'Loperamide HCl',
+    'Bacillus clausii',
+    'Aluminum hydroxide + Magnesium hydroxide + Simethicone',
 ] as const;
 
 const genderOptions = [
-    { value: 'no', label: 'No' },
-    { value: 'male', label: 'Male' },
-    { value: 'female', label: 'Female' },
+    { value: 'null', label: 'None (no restriction)' },
+    { value: 'not_for_pregnant', label: 'Not for pregnant' },
+    { value: 'female_only', label: 'Female only' },
+    { value: 'male_only', label: 'Male only' },
+] as const;
+
+const languageOptions = [
+    { value: 'english', label: 'English only' },
+    { value: 'tagalog', label: 'Tagalog / Filipino only' },
+    { value: 'bisaya', label: 'Bisaya / Cebuano only' },
+    { value: 'code-switched', label: 'Mixed languages (Taglish, Bisaya + English, or any combo)' },
+] as const;
+
+const confidenceOptions = [
+    { value: 'high', label: 'High' },
+    { value: 'medium', label: 'Medium' },
+    { value: 'low', label: 'Low' },
 ] as const;
 
 const breadcrumbs: BreadcrumbItem[] = [
@@ -209,7 +252,8 @@ export default function AnnotationGuide({
         symptomLabelsOther,
         selectedOtc,
         suggestedOtcOther,
-        selectedGender,
+        brandExamples,
+        genderLimitation,
         ageRestrictionOptions,
         ageRestrictions,
         contraindicationOptions,
@@ -218,6 +262,10 @@ export default function AnnotationGuide({
         pregnancyConsiderationsDetails,
         requiresMedicalReferralOptions,
         otcDetails,
+        userAge,
+        language,
+        confidence,
+        minAge,
         inquiryInputMode,
         selectedPopulationInquiry,
         manualUserInquiry,
@@ -239,6 +287,33 @@ export default function AnnotationGuide({
         setFormState((prev) => ({ ...prev, knownContraindicationsDetails: value }));
     const setPregnancyConsiderationsDetails = (value: string): void =>
         setFormState((prev) => ({ ...prev, pregnancyConsiderationsDetails: value }));
+    const setUserAge = (value: string): void =>
+        setFormState((prev) => ({ ...prev, userAge: value }));
+    const setLanguage = (value: string): void =>
+        setFormState((prev) => ({ ...prev, language: value }));
+    const setConfidence = (value: string): void =>
+        setFormState((prev) => ({ ...prev, confidence: value }));
+    const setMinAge = (value: string): void =>
+        setFormState((prev) => ({ ...prev, minAge: value }));
+    const setGenderLimitation = (value: string): void =>
+        setFormState((prev) => ({ ...prev, genderLimitation: value }));
+
+    const updateBrandExample = (index: number, value: string): void => {
+        setFormState((prev) => {
+            const next = [...prev.brandExamples];
+            next[index] = value;
+            return { ...prev, brandExamples: next };
+        });
+    };
+
+    const addBrandExample = (): void =>
+        setFormState((prev) => ({ ...prev, brandExamples: [...prev.brandExamples, ''] }));
+
+    const removeBrandExample = (index: number): void =>
+        setFormState((prev) => ({
+            ...prev,
+            brandExamples: prev.brandExamples.filter((_, i) => i !== index),
+        }));
 
     const resolvedUserInquiry = useMemo(() => {
         return inquiryInputMode === 'manual' ? manualUserInquiry : selectedPopulationInquiry;
@@ -246,11 +321,9 @@ export default function AnnotationGuide({
 
     const annotationStatusLookup = useMemo(() => {
         const lookup: Record<string, AnnotationInquiryStatus> = {};
-
         annotationStatusByInquiry.forEach((status) => {
             lookup[status.user_inquiry.trim().toLowerCase()] = status;
         });
-
         return lookup;
     }, [annotationStatusByInquiry]);
 
@@ -269,15 +342,12 @@ export default function AnnotationGuide({
 
     const getPopulationInquiryLabel = (inquiry: string): string => {
         const status = annotationStatusLookup[inquiry.trim().toLowerCase()];
-
         if (!status) {
             return `[ ] ${inquiry}`;
         }
-
         if (status.annotated_by.id === currentAnnotatorId) {
             return `[✓ You] ${inquiry}`;
         }
-
         return `[✓ ${status.annotated_by.name}] ${inquiry}`;
     };
 
@@ -287,15 +357,14 @@ export default function AnnotationGuide({
 
     const medicalNotesJson = useMemo(() => {
         const notes: Record<string, OtcDetail> = {};
-
         selectedOtcForNotes.forEach((otc) => {
             notes[otc] = otcDetails[otc] ?? {
                 dosage_mg: '',
                 times_per_day: '',
+                max_doses_per_day: '',
                 notes: '',
             };
         });
-
         return JSON.stringify({ otc_dosage_guide: notes });
     }, [otcDetails, selectedOtcForNotes]);
 
@@ -314,15 +383,6 @@ export default function AnnotationGuide({
             selectedSymptomLabels: checked
                 ? prev.selectedSymptomLabels.includes(symptom) ? prev.selectedSymptomLabels : [...prev.selectedSymptomLabels, symptom]
                 : prev.selectedSymptomLabels.filter((item) => item !== symptom),
-        }));
-    };
-
-    const handleGenderSelection = (gender: string, checked: boolean): void => {
-        setFormState((prev) => ({
-            ...prev,
-            selectedGender: checked
-                ? prev.selectedGender.includes(gender) ? prev.selectedGender : [...prev.selectedGender, gender]
-                : prev.selectedGender.filter((item) => item !== gender),
         }));
     };
 
@@ -350,6 +410,7 @@ export default function AnnotationGuide({
                 [otc]: {
                     dosage_mg: prev.otcDetails[otc]?.dosage_mg ?? '',
                     times_per_day: prev.otcDetails[otc]?.times_per_day ?? '',
+                    max_doses_per_day: prev.otcDetails[otc]?.max_doses_per_day ?? '',
                     notes: prev.otcDetails[otc]?.notes ?? '',
                     [field]: value,
                 },
@@ -361,7 +422,6 @@ export default function AnnotationGuide({
         if (editingEntry) {
             // eslint-disable-next-line react-hooks/set-state-in-effect -- intentional: single atomic form population from server-provided editingEntry; no cascade risk as formState is not in deps
             setFormState(buildFormState(editingEntry, pendingPopulationInquiries, nextPopulationInquiry, populationInquiries));
-
             return;
         }
 
@@ -409,7 +469,9 @@ export default function AnnotationGuide({
                             {editingEntry && <input type="hidden" name="_method" value="put" />}
                             <input type="hidden" name="medical_notes" value={medicalNotesJson} />
                             <input type="hidden" name="user_inquiry" value={resolvedUserInquiry} />
+
                             <div className="grid gap-4 md:grid-cols-2">
+                                {/* ── Inquiry Source ── */}
                                 <div className="space-y-3 md:col-span-2">
                                     <Label>Inquiry Source</Label>
                                     <div className="space-y-3 rounded-md border p-3">
@@ -450,11 +512,7 @@ export default function AnnotationGuide({
                                                     className="h-9 w-full rounded-md border border-input bg-transparent px-3 py-1 text-sm"
                                                 >
                                                     {populationInquiries.map((inquiry) => (
-                                                        <option
-                                                            key={inquiry}
-                                                            value={inquiry}
-                                                            disabled={isPopulationInquiryAnnotated(inquiry)}
-                                                        >
+                                                        <option key={inquiry} value={inquiry} disabled={isPopulationInquiryAnnotated(inquiry)}>
                                                             {getPopulationInquiryLabel(inquiry)}
                                                         </option>
                                                     ))}
@@ -487,13 +545,85 @@ export default function AnnotationGuide({
 
                                     {activeInquiryStatus && (
                                         <div className="rounded-md border border-amber-300 bg-amber-50 p-3 text-sm text-amber-900">
-                                            Already annotated by {activeInquiryStatus.annotated_by.name} (
-                                            {activeInquiryStatus.annotated_by.email}).
+                                            Already annotated by {activeInquiryStatus.annotated_by.name} ({activeInquiryStatus.annotated_by.email}).
                                             {isAnnotatedByCurrentUser ? ' You already answered this inquiry.' : ' Duplicate submission is blocked.'}
                                         </div>
                                     )}
                                 </div>
 
+                                {/* ── Meta: user age + language ── */}
+                                <div className="space-y-2">
+                                    <Label htmlFor="user_age">Patient Age (if stated in inquiry)</Label>
+                                    <Input
+                                        id="user_age"
+                                        name="user_age"
+                                        type="number"
+                                        min={0}
+                                        max={150}
+                                        value={userAge}
+                                        onChange={(e) => setUserAge(e.target.value)}
+                                        placeholder="e.g. 14 — leave blank if not mentioned"
+                                    />
+                                    <InputError message={errors.user_age} />
+                                </div>
+
+                                <div className="space-y-2">
+                                    <Label htmlFor="language">Inquiry Language</Label>
+                                    <select
+                                        id="language"
+                                        name="language"
+                                        value={language}
+                                        onChange={(e) => setLanguage(e.target.value)}
+                                        className="h-9 w-full rounded-md border border-input bg-transparent px-3 py-1 text-sm"
+                                    >
+                                        <option value="">— select language —</option>
+                                        {languageOptions.map((opt) => (
+                                            <option key={opt.value} value={opt.value}>
+                                                {opt.label}
+                                            </option>
+                                        ))}
+                                    </select>
+                                    <InputError message={errors.language} />
+                                </div>
+
+                                {/* ── Confidence + Min Age ── */}
+                                <div className="space-y-2">
+                                    <Label htmlFor="confidence">Annotation Confidence</Label>
+                                    <select
+                                        id="confidence"
+                                        name="confidence"
+                                        value={confidence}
+                                        onChange={(e) => setConfidence(e.target.value)}
+                                        className="h-9 w-full rounded-md border border-input bg-transparent px-3 py-1 text-sm"
+                                    >
+                                        <option value="">— select confidence —</option>
+                                        {confidenceOptions.map((opt) => (
+                                            <option key={opt.value} value={opt.value}>
+                                                {opt.label}
+                                            </option>
+                                        ))}
+                                    </select>
+                                    <InputError message={errors.confidence} />
+                                </div>
+
+                                <div className="space-y-2">
+                                    <Label htmlFor="min_age">
+                                        Min Age for Most Restrictive Drug (years, 0 = no restriction)
+                                    </Label>
+                                    <Input
+                                        id="min_age"
+                                        name="min_age"
+                                        type="number"
+                                        min={0}
+                                        max={150}
+                                        value={minAge}
+                                        onChange={(e) => setMinAge(e.target.value)}
+                                        placeholder="e.g. 12"
+                                    />
+                                    <InputError message={errors.min_age} />
+                                </div>
+
+                                {/* ── Symptom Labels ── */}
                                 <div className="space-y-2 md:col-span-2">
                                     <Label>Symptom Labels (Checklist)</Label>
                                     <div className="grid gap-2 rounded-md border p-3 sm:grid-cols-2 md:grid-cols-3">
@@ -536,25 +666,24 @@ export default function AnnotationGuide({
                                             />
                                             <span className="font-semibold">Others</span>
                                         </label>
-                                        {selectedSymptomLabels.includes('OTHER') && (
-                                            <div className="md:col-span-3">
-                                                <Label htmlFor="symptom_labels_other">If Others, specify</Label>
-                                                <Input
-                                                    id="symptom_labels_other"
-                                                    name="symptom_labels_other"
-                                                    value={symptomLabelsOther}
-                                                    onChange={(event) => setSymptomLabelsOther(event.target.value)}
-                                                    placeholder="Enter symptom label"
-                                                />
-                                            </div>
-                                        )}
+                                    </div>
+                                    <div className="space-y-1">
+                                        <Label htmlFor="symptom_labels_other">Describe symptom in your own words (optional — only if the symptom is not in the list above)</Label>
+                                        <Input
+                                            id="symptom_labels_other"
+                                            name="symptom_labels_other"
+                                            value={symptomLabelsOther}
+                                            onChange={(event) => setSymptomLabelsOther(event.target.value)}
+                                            placeholder="e.g. eye redness, ear pain, swollen gums..."
+                                        />
+                                        <InputError message={errors.symptom_labels_other} />
                                     </div>
                                     <InputError message={errors.symptom_labels} />
-                                    <InputError message={errors.symptom_labels_other} />
                                 </div>
 
+                                {/* ── Suggested OTC ── */}
                                 <div className="space-y-2 md:col-span-2">
-                                    <Label>Suggested OTC (Checklist)</Label>
+                                    <Label>Suggested OTC (Checklist — Generic Names)</Label>
                                     <div className="grid gap-2 rounded-md border p-3 md:grid-cols-2">
                                         {otcOptions.map((otc) => (
                                             <label
@@ -574,7 +703,7 @@ export default function AnnotationGuide({
                                                     checked={selectedOtc.includes(otc)}
                                                     onChange={(event) => handleOtcSelection(otc, event.target.checked)}
                                                 />
-                                                <span>{otc}</span>
+                                                <span className="leading-snug">{otc}</span>
                                             </label>
                                         ))}
                                         <label
@@ -612,14 +741,49 @@ export default function AnnotationGuide({
                                     <InputError message={errors.suggested_otc_other} />
                                 </div>
 
+                                {/* ── Brand Examples ── */}
                                 {selectedOtcForNotes.length > 0 && (
                                     <div className="space-y-2 md:col-span-2">
-                                        <Label>Medical Notes (JSON-ready per selected OTC)</Label>
+                                        <Label>Brand Examples (from vending machine)</Label>
+                                        <div className="space-y-2 rounded-md border p-3">
+                                            {brandExamples.map((brand, i) => (
+                                                <div key={i} className="flex items-center gap-2">
+                                                    <Input
+                                                        name="brand_examples[]"
+                                                        value={brand}
+                                                        onChange={(e) => updateBrandExample(i, e.target.value)}
+                                                        placeholder="e.g. Biogesic, Tempra"
+                                                        className="flex-1"
+                                                    />
+                                                    <Button
+                                                        type="button"
+                                                        variant="outline"
+                                                        size="sm"
+                                                        onClick={() => removeBrandExample(i)}
+                                                    >
+                                                        Remove
+                                                    </Button>
+                                                </div>
+                                            ))}
+                                            <Button type="button" variant="outline" size="sm" onClick={addBrandExample}>
+                                                + Add brand example
+                                            </Button>
+                                        </div>
+                                    </div>
+                                )}
+
+                                {/* ── Medical Notes (dosage guide per OTC) ── */}
+                                {selectedOtcForNotes.length > 0 && (
+                                    <div className="space-y-2 md:col-span-2">
+                                        <Label>Medical Notes (dosage guide per selected OTC)</Label>
                                         <div className="space-y-3 rounded-md border p-3">
                                             {selectedOtcForNotes.map((otc) => (
-                                                <div key={otc} className="grid gap-3 rounded-md border p-3 md:grid-cols-3">
+                                                <div key={otc} className="grid gap-3 rounded-md border p-3 md:grid-cols-4">
+                                                    <div className="space-y-1 md:col-span-4">
+                                                        <p className="text-sm font-medium">{otc}</p>
+                                                    </div>
                                                     <div className="space-y-1">
-                                                        <Label htmlFor={`dosage-${otc}`}>{otc} dosage (mg)</Label>
+                                                        <Label htmlFor={`dosage-${otc}`}>Dosage (mg)</Label>
                                                         <Input
                                                             id={`dosage-${otc}`}
                                                             value={otcDetails[otc]?.dosage_mg ?? ''}
@@ -628,7 +792,7 @@ export default function AnnotationGuide({
                                                         />
                                                     </div>
                                                     <div className="space-y-1">
-                                                        <Label htmlFor={`times-${otc}`}>Times per day</Label>
+                                                        <Label htmlFor={`times-${otc}`}>Times/day</Label>
                                                         <Input
                                                             id={`times-${otc}`}
                                                             value={otcDetails[otc]?.times_per_day ?? ''}
@@ -637,12 +801,21 @@ export default function AnnotationGuide({
                                                         />
                                                     </div>
                                                     <div className="space-y-1">
+                                                        <Label htmlFor={`maxdoses-${otc}`}>Max doses/day</Label>
+                                                        <Input
+                                                            id={`maxdoses-${otc}`}
+                                                            value={otcDetails[otc]?.max_doses_per_day ?? ''}
+                                                            onChange={(event) => updateOtcDetail(otc, 'max_doses_per_day', event.target.value)}
+                                                            placeholder="e.g. 4"
+                                                        />
+                                                    </div>
+                                                    <div className="space-y-1">
                                                         <Label htmlFor={`notes-${otc}`}>Notes</Label>
                                                         <Input
                                                             id={`notes-${otc}`}
                                                             value={otcDetails[otc]?.notes ?? ''}
                                                             onChange={(event) => updateOtcDetail(otc, 'notes', event.target.value)}
-                                                            placeholder="e.g. after meals"
+                                                            placeholder="e.g. Take after meals"
                                                         />
                                                     </div>
                                                 </div>
@@ -652,6 +825,7 @@ export default function AnnotationGuide({
                                     </div>
                                 )}
 
+                                {/* ── Age Restriction ── */}
                                 <div className="space-y-2 md:col-span-2">
                                     <Label>Age Restriction</Label>
                                     <div className="grid gap-2 rounded-md border p-3 sm:grid-cols-2">
@@ -703,13 +877,14 @@ export default function AnnotationGuide({
                                                 required
                                                 value={ageRestrictions}
                                                 onChange={(event) => setAgeRestrictions(event.target.value)}
-                                                placeholder="e.g. Not for children below 12 years old, Not for elderly above 65 years old"
+                                                placeholder="e.g. Not for children below 12 years old"
                                             />
                                             <InputError message={errors.age_restrictions_details} />
                                         </div>
                                     )}
                                 </div>
 
+                                {/* ── Contraindications ── */}
                                 <div className="space-y-2 md:col-span-2">
                                     <Label>Possible Drug Contraindication</Label>
                                     <div className="grid gap-2 rounded-md border p-3 sm:grid-cols-2">
@@ -761,13 +936,14 @@ export default function AnnotationGuide({
                                                 required
                                                 value={knownContraindicationsDetails}
                                                 onChange={(event) => setKnownContraindicationsDetails(event.target.value)}
-                                                placeholder="e.g. Isotretinoin in pregnancy, Decongestants in hypertension"
+                                                placeholder="e.g. Ibuprofen contraindicated in peptic ulcer disease"
                                             />
                                             <InputError message={errors.known_contraindications_details} />
                                         </div>
                                     )}
                                 </div>
 
+                                {/* ── Pregnancy Considerations ── */}
                                 <div className="space-y-2 md:col-span-2">
                                     <Label>Pregnancy Considerations</Label>
                                     <div className="grid gap-2 rounded-md border p-3 sm:grid-cols-2">
@@ -826,6 +1002,7 @@ export default function AnnotationGuide({
                                     )}
                                 </div>
 
+                                {/* ── Requires Medical Referral ── */}
                                 <div className="space-y-2 md:col-span-2">
                                     <Label>Requires Medical Referral</Label>
                                     <div className="grid gap-2 rounded-md border p-3 sm:grid-cols-2">
@@ -869,31 +1046,23 @@ export default function AnnotationGuide({
                                     <InputError message={errors.requires_medical_referral_options} />
                                 </div>
 
+                                {/* ── Gender-specific Limitation ── */}
                                 <div className="space-y-2 md:col-span-2">
-                                    <Label>Gender-specific limitation (Checklist)</Label>
-                                    <div className="grid gap-2 rounded-md border p-3 sm:grid-cols-3">
-                                        {genderOptions.map((option) => (
-                                            <label
-                                                key={option.value}
-                                                className={cn(
-                                                    'flex items-center gap-2 rounded-md border px-2 py-1 text-sm',
-                                                    selectedGender.includes(option.value)
-                                                        ? 'border-green-500 bg-green-100 text-green-900'
-                                                        : 'border-transparent',
-                                                )}
-                                            >
-                                                <input
-                                                    type="checkbox"
-                                                    name="gender_specific_limitations[]"
-                                                    value={option.value}
-                                                    className="size-4"
-                                                    checked={selectedGender.includes(option.value)}
-                                                    onChange={(event) => handleGenderSelection(option.value, event.target.checked)}
-                                                />
-                                                <span>{option.label}</span>
-                                            </label>
+                                    <Label htmlFor="gender_specific_limitations">Gender-specific Limitation</Label>
+                                    <select
+                                        id="gender_specific_limitations"
+                                        name="gender_specific_limitations"
+                                        value={genderLimitation}
+                                        onChange={(e) => setGenderLimitation(e.target.value)}
+                                        className="h-9 w-full rounded-md border border-input bg-transparent px-3 py-1 text-sm"
+                                    >
+                                        <option value="">— select —</option>
+                                        {genderOptions.map((opt) => (
+                                            <option key={opt.value} value={opt.value}>
+                                                {opt.label}
+                                            </option>
                                         ))}
-                                    </div>
+                                    </select>
                                     <InputError message={errors.gender_specific_limitations} />
                                 </div>
                             </div>

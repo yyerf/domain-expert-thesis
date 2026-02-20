@@ -18,11 +18,16 @@ class AnnotationEntry extends Model
     protected $fillable = [
         'annotated_by',
         'symptom_name',
+        'user_age',
+        'language',
+        'confidence',
+        'min_age',
         'assigned_symptom_label',
         'validated_symptom_label',
         'is_misclassified',
         'otc_applicable',
         'otc_drug_name',
+        'brand_examples',
         'age_restrictions',
         'pregnancy_considerations',
         'gender_specific_limitations',
@@ -40,6 +45,8 @@ class AnnotationEntry extends Model
     protected function casts(): array
     {
         return [
+            'user_age' => 'integer',
+            'min_age' => 'integer',
             'is_misclassified' => 'boolean',
             'otc_applicable' => 'boolean',
             'requires_medical_referral' => 'boolean',
