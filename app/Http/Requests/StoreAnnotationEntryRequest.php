@@ -51,7 +51,6 @@ class StoreAnnotationEntryRequest extends FormRequest
                     }
                 },
             ],
-            'user_age' => ['nullable', 'integer', 'min:0', 'max:150'],
             'language' => [
                 'required',
                 'string',
@@ -133,8 +132,6 @@ class StoreAnnotationEntryRequest extends FormRequest
                 'max:255',
                 Rule::requiredIf(fn (): bool => in_array('OTHER', $this->input('suggested_otc', []), true)),
             ],
-            'brand_examples' => ['nullable', 'array'],
-            'brand_examples.*' => ['nullable', 'string', 'max:255'],
             'age_restriction_options' => ['required', 'array', 'min:1', 'max:1'],
             'age_restriction_options.*' => ['required', 'string', Rule::in(['yes', 'no'])],
             'age_restrictions_details' => [
@@ -159,7 +156,7 @@ class StoreAnnotationEntryRequest extends FormRequest
                 'max:2000',
                 Rule::requiredIf(fn (): bool => in_array('yes', $this->input('pregnancy_considerations_options', []), true)),
             ],
-            'gender_specific_limitations' => ['required', 'string', Rule::in(['null', 'not_for_pregnant', 'female_only', 'male_only'])],
+            'gender_specific_limitations' => ['required', 'string', Rule::in(['null', 'female_only', 'male_only'])],
             'requires_medical_referral_options' => ['required', 'array', 'min:1', 'max:1'],
             'requires_medical_referral_options.*' => ['required', 'string', Rule::in(['yes', 'no'])],
             'medical_notes' => [

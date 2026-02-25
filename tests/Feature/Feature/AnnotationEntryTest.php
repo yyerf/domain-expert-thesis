@@ -48,7 +48,6 @@ test('authenticated users can create annotation entries', function () {
         'min_age' => 12,
         'symptom_labels' => ['FEVER', 'HEADACHE'],
         'suggested_otc' => ['Paracetamol'],
-        'brand_examples' => ['Biogesic', 'Tempra'],
         'age_restriction_options' => ['yes'],
         'age_restrictions_details' => 'Avoid in children under 3 months unless advised by a doctor.',
         'pregnancy_considerations_options' => ['no'],
@@ -84,7 +83,6 @@ test('duplicate inquiry cannot be annotated twice', function () {
     AnnotationEntry::query()->create([
         'annotated_by' => $user->id,
         'symptom_name' => 'I have fever and headache',
-        'user_age' => null,
         'language' => 'english',
         'confidence' => 'high',
         'min_age' => 12,
@@ -96,19 +94,16 @@ test('duplicate inquiry cannot be annotated twice', function () {
             'selected' => ['Paracetamol'],
             'other' => null,
         ], JSON_UNESCAPED_SLASHES),
-        'brand_examples' => json_encode(['Biogesic'], JSON_UNESCAPED_SLASHES),
         'age_restrictions' => null,
         'pregnancy_considerations' => 'NONE',
         'gender_specific_limitations' => 'null',
         'known_contraindications' => 'NONE',
-        'red_flag_symptoms' => null,
         'requires_medical_referral' => false,
         'medical_notes' => json_encode(['otc_dosage_guide' => new stdClass], JSON_UNESCAPED_SLASHES),
     ]);
 
     $response = $this->actingAs($user)->post(route('annotations.store'), [
         'user_inquiry' => 'I have fever and headache',
-        'user_age' => null,
         'language' => 'english',
         'confidence' => 'high',
         'min_age' => 12,
@@ -141,7 +136,6 @@ test('UNKNOWN symptom label is accepted without symptom labels other', function 
 
     $response = $this->actingAs($user)->post(route('annotations.store'), [
         'user_inquiry' => 'Dili ko alam kung ano ang problema ko',
-        'user_age' => null,
         'language' => 'bisaya',
         'confidence' => 'low',
         'min_age' => 0,
@@ -169,7 +163,6 @@ test('suggested otc others requires custom value when selected', function () {
 
     $response = $this->actingAs($user)->post(route('annotations.store'), [
         'user_inquiry' => 'Custom inquiry for otc other',
-        'user_age' => null,
         'language' => 'english',
         'confidence' => 'high',
         'min_age' => 0,
@@ -201,7 +194,6 @@ test('annotators can update an existing annotation entry', function () {
     $entry = AnnotationEntry::query()->create([
         'annotated_by' => $user->id,
         'symptom_name' => 'Old inquiry text',
-        'user_age' => null,
         'language' => 'english',
         'confidence' => 'medium',
         'min_age' => 0,
@@ -213,26 +205,22 @@ test('annotators can update an existing annotation entry', function () {
             'selected' => ['Paracetamol'],
             'other' => null,
         ], JSON_UNESCAPED_SLASHES),
-        'brand_examples' => json_encode([], JSON_UNESCAPED_SLASHES),
         'age_restrictions' => 'NONE',
         'pregnancy_considerations' => 'NONE',
         'gender_specific_limitations' => 'null',
         'known_contraindications' => 'NONE',
-        'red_flag_symptoms' => null,
         'requires_medical_referral' => false,
         'medical_notes' => json_encode(['otc_dosage_guide' => new stdClass], JSON_UNESCAPED_SLASHES),
     ]);
 
     $response = $this->actingAs($user)->put(route('annotations.update', $entry), [
         'user_inquiry' => 'Updated inquiry text',
-        'user_age' => 25,
         'language' => 'code-switched',
         'confidence' => 'high',
         'min_age' => 18,
         'symptom_labels' => ['FEVER', 'OTHER'],
         'symptom_labels_other' => 'CUSTOM_LABEL',
         'suggested_otc' => ['Ibuprofen'],
-        'brand_examples' => ['Advil'],
         'age_restriction_options' => ['yes'],
         'age_restrictions_details' => 'Adults only',
         'pregnancy_considerations_options' => ['yes'],
@@ -261,7 +249,6 @@ test('annotators can update an existing annotation entry', function () {
     expect($entry->language)->toBe('code-switched');
     expect($entry->confidence)->toBe('high');
     expect($entry->min_age)->toBe(18);
-    expect($entry->user_age)->toBe(25);
     expect($entry->gender_specific_limitations)->toBe('male_only');
 });
 
@@ -271,7 +258,6 @@ test('users can export annotation entries as json', function () {
     AnnotationEntry::query()->create([
         'annotated_by' => $user->id,
         'symptom_name' => 'I have severe headache',
-        'user_age' => 30,
         'language' => 'english',
         'confidence' => 'high',
         'min_age' => 12,
@@ -283,12 +269,10 @@ test('users can export annotation entries as json', function () {
             'selected' => ['Ibuprofen'],
             'other' => null,
         ], JSON_UNESCAPED_SLASHES),
-        'brand_examples' => json_encode(['Advil'], JSON_UNESCAPED_SLASHES),
         'age_restrictions' => 'Avoid in children under 12 years without clinician advice.',
         'pregnancy_considerations' => 'Avoid in the first trimester unless physician-approved.',
         'gender_specific_limitations' => 'null',
         'known_contraindications' => 'Do not combine with anticoagulants.',
-        'red_flag_symptoms' => null,
         'requires_medical_referral' => true,
         'medical_notes' => json_encode([
             'otc_dosage_guide' => [
@@ -314,41 +298,38 @@ test('users can export annotation entries as json', function () {
     expect($content)->toContain('user_inquiry');
     expect($content)->toContain('I have severe headache');
     expect($content)->toContain('otc_dosage_guide');
-    expect($content)->toContain('generated_at');
     expect($content)->toContain('total_entries');
-    expect($content)->toContain('_schema_version');
     expect($content)->toContain('entry_id');
     expect($content)->toContain('max_doses_per_day');
+    expect($content)->not->toContain('generated_at');
+    expect($content)->not->toContain('_schema_version');
+    expect($content)->not->toContain('annotated_by');
+    expect($content)->not->toContain('annotated_at');
+    expect($content)->not->toContain('has_age_restrictions');
+    expect($content)->not->toContain('has_known_contraindications');
+    expect($content)->not->toContain('has_pregnancy_considerations');
 
     expect($payload)->toBeArray();
-    expect($payload['_schema_version'])->toBe('1.0');
     expect($payload['total_entries'])->toBe(1);
     expect($payload['entries'])->toHaveCount(1);
 
     $entry = $payload['entries'][0];
     expect($entry['entry_id'])->toBe('de_001');
     expect($entry['user_inquiry'])->toBe('I have severe headache');
-    expect($entry['user_age'])->toBe(30);
     expect($entry['language'])->toBe('english');
     expect($entry['confidence'])->toBe('high');
-    expect($entry['min_age'])->toBe(12);
     expect($entry['symptom_labels'])->toBe(['HEADACHE']);
     expect($entry['symptom_labels_other'])->toBeNull();
-    expect($entry['suggested_otc']['selected'])->toBe(['Ibuprofen']);
-    expect($entry['suggested_otc']['brand_examples'])->toBe(['Advil']);
-    expect($entry['suggested_otc']['other'])->toBeNull();
-    expect($entry['has_age_restrictions'])->toBeTrue();
-    expect($entry['has_known_contraindications'])->toBeTrue();
-    expect($entry['known_contraindications_details'])->toBe('Do not combine with anticoagulants.');
-    expect($entry['has_pregnancy_considerations'])->toBeTrue();
-    expect($entry['pregnancy_considerations_details'])->toBe('Avoid in the first trimester unless physician-approved.');
+    expect($entry['suggested_otc'])->toBe(['Ibuprofen']);
+    expect($entry['age_restrictions'])->toBe('Avoid in children under 12 years without clinician advice.');
+    expect($entry['known_contraindications'])->toBe('Do not combine with anticoagulants.');
+    expect($entry['pregnancy_considerations'])->toBe('Avoid in the first trimester unless physician-approved.');
     expect($entry['gender_specific_limitations'])->toBeNull();
     expect($entry['requires_medical_referral'])->toBeTrue();
-    expect($entry['annotated_by'])->toBe($user->name);
-    expect($entry['medical_notes']['otc_dosage_guide']['Ibuprofen']['dosage_mg'])->toBe(400);
-    expect($entry['medical_notes']['otc_dosage_guide']['Ibuprofen']['times_per_day'])->toBe(3);
-    expect($entry['medical_notes']['otc_dosage_guide']['Ibuprofen']['max_doses_per_day'])->toBe(3);
-    expect($entry['medical_notes']['otc_dosage_guide']['Ibuprofen']['notes'])->toBe('Take with food.');
+    expect($entry['otc_dosage_guide']['Ibuprofen']['dosage_mg'])->toBe(400);
+    expect($entry['otc_dosage_guide']['Ibuprofen']['times_per_day'])->toBe(3);
+    expect($entry['otc_dosage_guide']['Ibuprofen']['max_doses_per_day'])->toBe(3);
+    expect($entry['otc_dosage_guide']['Ibuprofen']['notes'])->toBe('Take with food.');
 });
 
 test('annotators can submit with empty otc when referral is required', function () {
@@ -356,14 +337,12 @@ test('annotators can submit with empty otc when referral is required', function 
 
     $response = $this->actingAs($user)->post(route('annotations.store'), [
         'user_inquiry' => 'Grabe ang sakit ng dibdib ko, hirap huminga',
-        'user_age' => null,
         'language' => 'code-switched',
         'confidence' => 'high',
         'min_age' => 0,
         'symptom_labels' => ['UNKNOWN'],
         'symptom_labels_other' => 'chest pain with difficulty breathing — possible cardiac emergency',
         'suggested_otc' => [],
-        'brand_examples' => [],
         'age_restriction_options' => ['no'],
         'pregnancy_considerations_options' => ['no'],
         'known_contraindications_options' => ['no'],
